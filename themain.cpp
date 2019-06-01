@@ -10,27 +10,27 @@
 #include<math.h>
 #include<fstream>
 using namespace std;
-int Cir = 100;///EM迭代次数
-float rate = 0.5;///预测是否激活的阈值
+int Cir = 100;
+float rate = 0.5;
 const int MAX=10000;
-long long Y_Y, Y_N, N_Y, N_N,F1,MSE;///Y_Y本来是激活的_被预测是激活的样例数
-long long D[21] ;///D[i]：所有事件中活跃节点的模式i的实例数
+long long Y_Y, Y_N, N_Y, N_N,F1,MSE;
+long long D[21] ;
 long long D_N[21];
 double P[21]= {0.066,0.074,0.111,0.307,0.069,0.091,0.067,0.106,0.381,0.165,0.038,0.186,0.399,0.063,0.619,0.444,0.070,0.420,0.662,0.485}; //Pc
-long long sum_D[21];///在所有事件中模式c活跃节点的c实例数和与不活跃节点的c实例数的总和
+long long sum_D[21];
 struct node
 {
-    int user;///用户编号
-    set<int>p;///模式集合
-    map<int, long long> num;///模式映射的实例数
+    int user;
+    set<int>p;
+    map<int, long long> num;
 };
-///求AUC用到的结构
+
 struct temNode
 {
     int label;
     double psv;
 };
-///temNode 按pvs从大到小排序
+
 bool cmp(const temNode &a, const temNode &b)
 {
     if (a.psv != b.psv)
@@ -38,7 +38,7 @@ bool cmp(const temNode &a, const temNode &b)
     else return a.label>b.label;
 
 }
-///temNode 按pvs从小到大排序
+
 bool cmp1(const temNode &a, const temNode &b)
 {
     if (a.psv != b.psv)
@@ -47,51 +47,49 @@ bool cmp1(const temNode &a, const temNode &b)
 
 }
 
-set<int>Event_testSet;///测试集
-set<int>Event_dataSet;///数据集
+set<int>Event_testSet;
+set<int>Event_dataSet;
 map<int, double>Pvs[1800000];
-map<int,int>S_num;///训练集事件编码
-map<int,int>testS_num;///测试集事件编码
-vector<node>_eventPattern[MAX];///每个事件的被活跃节点
-vector<node>N_eventPattern[MAX];///每个事件的不被活跃节点
-double PL[21];///清华代码产生的pc  pc=x/(x+y)
-///初始化pc,为求pc时公式的分母赋值
+map<int,int>S_num;
+map<int,int>testS_num;
+vector<node>_eventPattern[MAX];
+vector<node>N_eventPattern[MAX];
+double PL[21];
+
 void inital()
 {
     for (int i = 0; i<20; i++)
     {
-        ///PL[i]代表清华代码的pc=x/(x+y)
+        
         PL[i]=D[i]*1.0/(D[i]+D_N[i]);
         cout<<PL[i]<<endl;
-///---------------------可更改部分----初始化pc--------------///
-///若不更改则是以论文中pc值初始化
-        //P[i]=0.2;
+
+
+        P[i]=0.4;
         ///  P[i]=D[i]*1.0/(D[i] + D_[i]);//D[i]*1.0/(D[i] + D_[i]*0.11);
-///--------------------------------------------------///
+
         cout<<i<<" : "<<P[i]<<endl;
     }
     for (int i = 0; i<20; i++)
     {
-        ///------可更改部分----减小求pc时公式的分母--------///
+       
         sum_D[i] =D[i]+D_N[i]*0.05;//D[i]*2;
         ///sum_D[i] =D[i]+D[i]*2;
 
-        ///--------------------------------------------------///
+      
     }
 
 }
 int num;
-///读取事件中的活跃节点及可能激活它的模式和实例数
+
 void readEPF_Active(char * eventPatternFile_Active,bool fag)
 {
-    ///事件S   节点数K
-    ///活跃节点V   模式数  模式p...实例数
-    ///.....
+    
     cout<<"---------------read active node---------------"<<endl;
     int K, S, V, N, P;
     int M;
-    fstream     f(eventPatternFile_Active);//创建一个fstream文件流对象
-    string line;//保存读入的每一行
+    fstream     f(eventPatternFile_Active);
+    string line;
     int a,b,c;
     char l[190];
     while(getline(f,line))
@@ -102,22 +100,22 @@ void readEPF_Active(char * eventPatternFile_Active,bool fag)
         sscanf(p,"%d %d",&S,&n);
         if(n!=0)
         {
-            ///将事件编号
+            
             if(fag){
                 S_num[S]=num;
-                Event_dataSet.insert(S);///将事件放进训练集
+                Event_dataSet.insert(S);
             }
 
             else
             {
                 testS_num[S]=num;
-                Event_testSet.insert(S);///将事件放进测试集
+                Event_testSet.insert(S);
             }
             S=num++;
             _eventPattern[S].clear();
         }
-        ///读取被激活点及可能激活它的模式和模式实例个数
-        while(n--)//会自动把\n换行符去掉
+        
+        while(n--)
         {
             getline(f,line);
             const  char *p;
@@ -134,7 +132,7 @@ void readEPF_Active(char * eventPatternFile_Active,bool fag)
                 node1.num[P] = M;
                 if(fag)D[P]+=M;
             }
-            _eventPattern[S].push_back(node1);///在S事件中插入节点
+            _eventPattern[S].push_back(node1);
         }
     }
     f.close();
@@ -142,13 +140,10 @@ void readEPF_Active(char * eventPatternFile_Active,bool fag)
 
     cout<<"read over"<<endl;
 }
-///读取事件中的不活跃节点及不可能激活它的模式和实例数
+
 void readEPF_N_active(char *eventPatternFile_N_Active,bool fag)
 {
-    ///文件格式
-    ///事件S   节点数K
-    ///不活跃节点V   匹配个数n  模式p...
-    ///.....
+    
     cout<<"read not active node"<<endl;
     int K, S, V, N, P;
     int M;
@@ -206,14 +201,13 @@ void readEPF_N_active(char *eventPatternFile_N_Active,bool fag)
                 strcpy(l,q);
                 node1.p.insert(P);
                 node1.num[P] = M;
-                D_N[P]+=M;///不活跃节点模式数
+                D_N[P]+=M;
             }
-            ///------------可修改部分------修改两个数字，对不活跃节点采样--///
-            ///对不活跃节点进行采样
+            
             int a=rand()%10000;
             if(a<=100)
                 N_eventPattern[S].push_back(node1);
-            ///---------------------------------///
+           
         }
     }
     f.close();
@@ -223,7 +217,6 @@ void readEPF_N_active(char *eventPatternFile_N_Active,bool fag)
 //计算Pvs
 int K;
 double LOGP=0;
-///节点v在事件s上的被激活概率
 void getPVS()
 {
     set<int>::iterator iit, i;
@@ -266,17 +259,14 @@ void getPc()
             }
         }
     }
-    ///打印更新后的pc值
+    
     for (int j = 0; j < 20; j++)
     {
         P[j] = (sum[j]*1.0 )/ sum_D[j];
         cout<<"p"<<j<<":"<<P[j]<<endl;
     }
 }
-///
-///-------------根据预测训练集被激活概率求评价指标------------///
-///-------------参数f为true代表根据EM算法得出来的pc来预测。否则根据清华的pc预测////
-///-------------result为将结果打印到的文件名----------------////
+
 double get_rate(bool f,char *result)
 {
     ofstream fout(result);
@@ -411,8 +401,8 @@ double get_rate(bool f,char *result)
     return 0;
 }
 
-double LOG=-999999999;///似然函数初始值
-///求似然函数
+double LOG=-999999999;
+
 double logP()
 {
     set<int>::iterator iit, i;
@@ -469,7 +459,7 @@ void EM()
         getPVS();
         logP();
         cout<<LOGP<<"    "<<LOG<<"  "<<LOGP-LOG<<endl;
-        if(LOGP-LOG<0.1)///新似然函数-旧似然函数小于0.1则收敛
+        if(LOGP-LOG<0.1)
         {
             for(int i=0; i<20; i++)
             {
@@ -485,7 +475,7 @@ void EM()
         getPc();
         t++;
     }
-    ///打印收敛的pc值
+    
     for(int i=0; i<20; i++)
     {
         cout<<i<<"    "<<P[i]<<endl;
@@ -495,13 +485,13 @@ void test()
 {
     cout<<"into test function"<<endl;
     cout<<"the new pc"<<endl;
-    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    
    // get_rate(true,"E:/my_result.txt");
-    get_rate(true,"E:/论文调参指标/pc随机-0.05/my_result.txt");
+    get_rate(true,"E:/论文调参指标/pc随机-0.4/my_result.txt");
     cout<<endl<<endl;
     cout<<"pc=x/(x+y)"<<endl;
     //get_rate(false,"E:/qing_result.txt");
-    get_rate(false,"E:/论文调参指标/pc随机-0.05/qing_result.txt");
+    get_rate(false,"E:/论文调参指标/pc随机-0.4/qing_result.txt");
     /////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 int main()
@@ -512,7 +502,7 @@ int main()
     memset(D,0,sizeof(D));
     memset(D_N,0,sizeof(D_N));
     num=1;
-    readEPF_Active(eventPatternFile,true);///读取训练集活跃节点及可能激活它的模式
+    readEPF_Active(eventPatternFile,true);
     readEPF_N_active(N_eventPatternFile,true);///读取训练集不活跃节点及一定不激活它的模式
     for(int i=0; i<20; i++)
     {
