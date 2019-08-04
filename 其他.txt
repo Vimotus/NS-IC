@@ -1,0 +1,383 @@
+// EM.cpp: 定义控制台应用程序的入口点。
+//
+#include "stdafx.h"
+#include<iostream>
+#include<set>
+#include<map>
+#include<ctime>
+#include<string.h>
+#include<random>
+#include<vector>
+#include<algorithm>
+#include<math.h>
+#include<fstream>
+using namespace std;
+int Cir = 100;///EM迭代次数
+float rate = 0.5;///预测是否激活的阈值
+const int MAX = 10000;
+long long Y_Y, Y_N, N_Y, N_N, F1;///Y_Y本来是激活的_被预测是激活的样例数
+long long D[21];///D[i]：所有事件中活跃节点的模式i的实例数
+long long D_N[21];
+double P[21] = { 0.066,0.074,0.111,0.307,0.069,0.091,0.067,0.106,0.381,0.165,0.038,0.186,0.399,0.063,0.619,0.444,0.070,0.420,0.662,0.485 }; //Pc
+long long sum_D[21];
+struct node
+{
+	int user;
+	set<int>p;
+	map<int, long long> num;
+};
+struct temNode
+{
+	int label;
+	double psv;
+};
+bool cmp(const temNode &a, const temNode &b)
+{
+	if (a.psv != b.psv)
+		return a.psv>b.psv;
+	else return a.label>b.label;
+
+}
+bool cmp1(const temNode &a, const temNode &b)
+{
+	if (a.psv != b.psv)
+		return a.psv<b.psv;
+	else return a.label<b.label;
+
+}
+
+set<int>Event_testSet;///测试集
+set<int>Event_dataSet;///数据集
+map<int, double>Pvs[1800000];
+map<int, int>S_num;///训练集事件编码
+map<int, int>testS_num;///测试集事件编码
+vector<node>_eventPattern[MAX];///每个事件的被活跃节点
+vector<node>N_eventPattern[MAX];///每个事件的不被活跃节点
+double PL[21];///初始PC值
+
+void inital()
+{
+
+	for (int i = 0; i<20; i++)
+	{
+		///PL[i]代表清华代码的pc=x/(x+y)
+		PL[i] = D[i] * 1.0 / (D[i] + D_N[i]);
+		cout << PL[i] << endl;
+	}
+}
+int num;
+void readEPF_Active(char  eventPatternFile_Active[], bool fag)
+{
+	///事件S   节点数K
+	///活跃节点V   匹配个数n  模式p...
+	///.....
+	for (int i = 0; i < MAX; i++) {
+		if (!_eventPattern[i].empty())
+			_eventPattern[i].clear();
+	}
+
+	cout << "read active node" << endl;
+	long long K, S, V, N, P, n;
+	ifstream    in(eventPatternFile_Active);//创建一个fstream文件流对象
+	while (in >> S >> K) {
+		//cout << S << " " << K << endl;
+		if (K != 0) {
+			if (fag)
+				S_num[S] = num;
+			else
+			{
+				testS_num[S] = num;
+			}
+			S = num++;
+			if (fag)
+				Event_dataSet.insert(S);
+			else
+				Event_testSet.insert(S);
+
+		}
+		while (K--) {
+			in >> V >> n;
+			//cout << V << " " << n << " ";
+			node node1;
+			node1.user = V;
+			while (n--) {
+				in >> P >> N;
+				//cout << P << " " << N<<" ";
+				node1.p.insert(P);
+				node1.num[P] = N;
+				if (fag)D[P] += N;
+			}
+			_eventPattern[S].push_back(node1);
+			//cout <<S<< endl;
+		}
+	}
+	in.close();
+	cout << "read over" << endl;
+}
+void readEPF_N_active(char eventPatternFile_N_Active[], bool fag)
+{
+	///文件格式
+	///事件S   节点数K
+	///不活跃节点V   匹配个数n  模式p...
+	///.....
+	for (int i = 0; i < MAX; i++) {
+		if (!_eventPattern[i].empty())
+			N_eventPattern[i].clear();
+	}
+	cout << "read not active node" << endl;
+	long long K, n, S, V, N, P;
+
+	ifstream     in(eventPatternFile_N_Active);
+	while (in >> S >> K) {
+
+
+		if (K != 0) {
+			if (fag)
+			{
+				if (S_num[S] != 0)
+					S = S_num[S];
+				else
+				{
+					S_num[S] = num;
+					S = num++;
+				}
+			}
+			else
+			{
+				if (testS_num[S] != 0)
+				{
+					S = testS_num[S];
+				}
+				else
+				{
+					testS_num[S] = num;
+					S = num++;
+				}
+				Event_testSet.insert(S);
+			}
+
+		}//cout << S << "  " << K << endl;
+		while (K--) {
+
+			in >> V >> n;
+			//cout << V << " " << n <<" ";
+			node node1;
+			node1.user = V;
+			while (n--) {
+				in >> P >> N;
+				//cout << P << "  " << N << " ";
+				node1.p.insert(P);
+				node1.num[P] = N;
+				if (fag)
+					D_N[P] += N;
+			}
+
+
+			N_eventPattern[S].push_back(node1);
+
+
+			///---------------------------------///
+		}
+	}
+	in.close();
+	cout << "read over" << endl;
+}
+///-------------根据预测训练集被激活概率求评价指标------------///
+///-------------参数f为true代表根据EM算法得出来的pc来预测。否则根据清华的pc预测////
+///-------------result为将结果打印到的文件名----------------////
+double get_rate(bool f, char result[])
+{
+	ofstream fout(result);
+	Y_Y = 0, Y_N = 0, N_Y = 0, N_N = 0;
+	double Y_Y100 = 0, Y_N100 = 0, N_Y100 = 0, N_N100 = 0;
+	set<int>::iterator iit, i, q;
+	vector<temNode> sample;
+	int it;
+	double MSE = 0;
+	double MAP = 0;
+	int k = 0;
+	// cout<<Event_testSet.size()<<endl;
+	for (i = Event_testSet.begin(); i != Event_testSet.end(); i++)
+	{
+
+		for (it = 0; it <_eventPattern[*i].size(); it++)
+		{
+
+			node  node1 = _eventPattern[*i][it];
+			double Value = 1.0;
+
+			for (iit = node1.p.begin(); iit != node1.p.end(); iit++)
+			{
+				long long L = node1.num[*iit];
+
+				if (f)
+					Value *= pow((1 - P[*iit]), L);
+				else
+					Value *= pow((1 - PL[*iit]), L);
+			}
+
+			Value = 1 - Value;
+			if (Value >= 0 && Value <= 1) {
+				temNode N;
+				N.psv = Value;
+				N.label = 1;
+				sample.push_back(N);
+				if (Value>rate)
+					Y_Y++;
+				else
+					Y_N++;
+				if ((1 - Value)*(1 - Value) >= 0 && (1 - Value)*(1 - Value) <= 1)
+					MSE = MSE + (1 - Value)*(1 - Value);
+
+				//cout<<MSE<<" "<<(1 - Value)*(1 - Value)<<endl;
+				fout << Value << "  " << 1 << endl;
+				//if (*i == 52)cout << Value << endl;
+			}
+		}
+	}
+	cout << " 1111 " << endl;
+	double ab = 0;
+	for (i = Event_testSet.begin(); i != Event_testSet.end(); i++)
+	{
+
+		for (it = 0; it <N_eventPattern[*i].size(); it++)
+		{
+			node  node1 = N_eventPattern[*i][it];
+			double Value = 1.0;
+			for (iit = node1.p.begin(); iit != node1.p.end(); iit++)
+			{
+				int L = node1.num[*iit];
+				if (f)
+					Value *= pow((1 - P[*iit]), L);
+				else
+					Value *= pow((1 - PL[*iit]), L);
+
+			}
+
+			Value = 1 - Value;//
+			if (Value >= 0 && Value <= 1) {
+				temNode N;
+				N.psv = Value;
+				N.label = 0;
+				sample.push_back(N);
+				if (Value>rate)
+					N_Y++;
+				else
+					N_N++;
+				if ((Value* Value >= 0) && (Value*Value <= 1))
+					MSE = MSE + Value * Value;
+
+				fout << Value << "  " << 0 << endl;
+				// if(MSE>153310)
+				// ab=MSE;
+				//if(ab>=153311){
+				// int a;
+				// cin>>a;
+				// cout<<MSE<< "  "<<Value * Value<<endl;
+				//  }
+
+			}
+
+
+		}
+
+	}
+
+	cout << "222" << endl;
+	cout << endl << "实际--预测：Y_Y" << "  " << "Y_N" << " " << "N_N" << "   " << "N_Y" << endl;
+	cout << "            " << Y_Y << "   " << Y_N << " " << N_N << "   " << N_Y << endl;
+	sort(sample.begin(), sample.end(), cmp);
+
+	int flag = 0, su = 0, L = 1, M = 0, N = 0, RA = 0;
+	int j = 0;
+
+
+	sort(sample.begin(), sample.end(), cmp1);
+
+	long long n_pos = Y_Y + Y_N;
+	long long  n_neg = sample.size() - n_pos;
+	long long total = n_pos * n_neg;
+	long long accumulated_neg = 0;
+	long long satisfied = 0;
+	long long sum1 = 0;
+	long long  sum2 = 0;
+	long long  sum3 = 0;
+	int last = -1;
+	for (int sa = 0; sa<sample.size(); sa++)
+	{
+		if (last != -1 && sample[last].psv == sample[sa].psv) {
+			sum1 = sum1 + sa + 1;
+
+			sum3++;
+			if (sample[last].label == 1) {
+				sum2++;
+			}
+
+			last = sa;
+			continue;
+		}
+		if (sum2>0) {
+			satisfied = satisfied + (sum1 / sum3)*sum2;
+
+		}
+		sum2 = sum3 = 0;
+		sum1 = sa + 1;
+		if (sample[sa].label == 1) {
+			satisfied = satisfied + (sa + 1);
+
+		}
+
+		last = sa;
+
+	}
+	satisfied = satisfied - (n_pos + 1)*n_pos*1.0 / 2;
+	// cout<<satisfied<<"  "<<total<<endl;
+	double AUC = satisfied * 1.0 / total;
+	double P = Y_Y * 1.0 / (Y_Y + N_Y);
+	double accuracy = (Y_Y + N_N)*1.0 / (Y_Y + Y_N + N_N + N_Y);
+	MSE = MSE * 1.0 / (Y_N + N_N + N_Y + Y_Y);
+
+	cout << "AUC:  " << AUC << endl;
+	cout << "MSE: " << MSE << endl;
+	cout << "查准率：" << P << endl;
+	cout << "accuracy：" << accuracy << endl;
+
+	fout.close();
+	return 0;
+}
+void test()
+{
+	cout << "into test function" << endl;
+	char F2[100] = "F:/dealdata/qing_result.txt";
+	get_rate(false, F2);
+}
+int main()
+{
+
+	///char* eventPatternFile = "E:/论文/800trainx.txt";///事件被激活节点及其周边的活跃节点构成的模式和模式实例数的文件
+	char  eventPatternFile[100] = "F:/dealdata/1000点采样trainx.txt";///事件被激活节点及其周边的活跃节点构成的模式和模式实例数的文件
+																  ///char * N_eventPatternFile = "E:/论文/800trainy.txt";///事件不被激活节点及其周边的活跃节点构成的模式和模式实例数的文件
+	char  N_eventPatternFile[100] = "F:/dealdata/1000点采样trainy.txt";///事件不被激活节点及其周边的活跃节点构成的模式和模式实例数的文件
+	memset(D, 0, sizeof(D));
+	memset(D_N, 0, sizeof(D_N));
+	num = 1;
+	readEPF_Active(eventPatternFile, true);///读取训练集活跃节点及可能激活它的模式
+	readEPF_N_active(N_eventPatternFile, true);///读取训练集不活跃节点及一定不激活它的模式
+	for (int i = 0; i<20; i++)
+	{
+		cout << "x:" << D[i] << "  y:" << D_N[i] << endl;
+	}
+	inital();
+	num = 1;
+	char eventPatternFileT[100] = "F:/dealdata/1000未采样testx.txt";
+	readEPF_Active(eventPatternFile, false);///读取测试集活跃节点及可能激活它的模式
+	char eventPatternFileNT[100] = "F:/dealdata/1000未采样testy.txt";	           						///readEPF_Active("E:/论文/200testx.txt",false);///读取测试集活跃节点及可能激活它的模式
+	readEPF_N_active(eventPatternFileNT, false);
+	///readEPF_N_active("E:/论文/200testy.txt",false);
+	test();
+	int a;
+	cin >> a;
+	return 0;
+}
+
+
